@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 
 const FINNHUB_API_KEY = import.meta.env.VITE_FINNHUB_API_KEY;
-const ALPHA_VANTAGE_API_KEY = import.meta.env.VITE_ALPHA_VANTAGE_API_KEY;
 
 const defaultWatchlist = ["AAPL", "MSFT", "NVDA", "SPY", "TSLA"];
 
@@ -12,18 +11,15 @@ export default function App() {
 
   const [quote, setQuote] = useState(null);
   const [news, setNews] = useState([]);
-  const [chartData, setChartData] = useState([]);
-
-  const [watchQuotes, setWatchQuotes] = useState({});
-  const [positions, setPositions] = useState([]);
-
-  const [error, setError] = useState("");
-  const [lastUpdated, setLastUpdated] = useState("");
 
   const [watchlist, setWatchlist] = useState(() => {
     const saved = localStorage.getItem("marketpulse-watchlist");
     return saved ? JSON.parse(saved) : defaultWatchlist;
   });
+
+  const [positions, setPositions] = useState([]);
+  const [error, setError] = useState("");
+  const [lastUpdated, setLastUpdated] = useState("");
 
   useEffect(() => {
     localStorage.setItem("marketpulse-watchlist", JSON.stringify(watchlist));
@@ -43,68 +39,14 @@ export default function App() {
     return Array.isArray(res.data) ? res.data : [];
   }
 
-  async function fetchChart(symbol) {
-    const res = await axios.get("https://www.alphavantage.co/query", {
-      params: {
-        function: "TIME_SERIES_INTRADAY",
-        symbol,
-        interval: "5min",
-        outputsize: "compact",
-        apikey: ALPHA_VANTAGE_API_KEY,
-      },
-    });
-
-    const series = res.data["Time Series (5min)"];
-    if (!series) return [];
-
-    return Object.entries(series)
-      .map(([time, values]) => ({
-        time: new Date(time).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        price: Number(values["4. close"]),
-        raw: new Date(time).getTime(),
-      }))
-      .sort((a, b) => a.raw - b.raw)
-      .slice(-60);
-  }
-
-  async function fetchWatchlistQuotes(list) {
-    const results = await Promise.all(
-      list.map(async (symbol) => {
-        try {
-          const q = await fetchQuote(symbol);
-          return [symbol, q];
-        } catch {
-          return [symbol, null];
-        }
-      })
-    );
-
-    const map = {};
-    results.forEach(([sym, data]) => {
-      map[sym] = data;
-    });
-
-    setWatchQuotes(map);
-  }
-
   async function load(symbol) {
     setError("");
 
     try {
-      const [q, n, c] = await Promise.all([
-        fetchQuote(symbol),
-        fetchNews(),
-        fetchChart(symbol),
-      ]);
+      const [q, n] = await Promise.all([fetchQuote(symbol), fetchNews()]);
 
       setQuote(q);
       setNews(n);
-      setChartData(c);
-
-      fetchWatchlistQuotes(watchlist);
     } catch (e) {
       setError("Failed to load data");
     }
@@ -154,26 +96,6 @@ export default function App() {
   const changeColor =
     quote?.dp >= 0 ? "text-emerald-400" : "text-red-400";
 
-  const svgPoints = useMemo(() => {
-    if (!chartData.length) return "";
-
-    const pad = 20;
-    const h = 260;
-
-    const prices = chartData.map((d) => d.price);
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
-    const range = max - min || 1;
-
-    return chartData
-      .map((d, i) => {
-        const x = (i / (chartData.length - 1)) * (900 - pad * 2) + pad;
-        const y = pad + ((max - d.price) / range) * (h - pad * 2);
-        return `${x},${y}`;
-      })
-      .join(" ");
-  }, [chartData]);
-
   const portfolioPnL = useMemo(() => {
     return positions.reduce((sum, p) => {
       const current = quote?.c || p.entry;
@@ -215,7 +137,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* TOP CARDS (WITH HIGH/LOW RESTORED) */}
+        {/* TOP CARDS */}
         <div className="grid grid-cols-5 gap-4">
 
           <div className="bg-slate-900/60 p-5 rounded-2xl">
@@ -251,23 +173,72 @@ export default function App() {
 
         </div>
 
-        {/* CHART + NEWS */}
-        <div className="grid grid-cols-3 gap-6">
+        {/* GRID */}
+        <div className="grid grid-cols-2 gap-6">
 
-          <div className="col-span-2 bg-slate-900/60 p-6 rounded-3xl">
-            <h2 className="text-xl font-bold mb-4">{ticker} Chart</h2>
-            <svg viewBox="0 0 900 260" className="w-full h-64">
-              <polyline fill="none" stroke="#60a5fa" strokeWidth="3" points={svgPoints} />
-            </svg>
+          {/* MARKET OVERVIEW */}
+          <div className="bg-slate-900/60 p-6 rounded-3xl">
+            <h2 className="text-xl font-bold mb-4">Market Overview</h2>
+
+            <div className="space-y-2 text-slate-300">
+              <p>• Live dashboard mode active</p>
+              <p>• Tracking {ticker}</p>
+              <p>• Watchlist size: {watchlist.length}</p>
+              <p>• Last update: {lastUpdated}</p>
+            </div>
           </div>
 
+          {/* NEWS (UPGRADED) */}
           <div className="bg-slate-900/60 p-6 rounded-3xl">
-            <h2 className="text-xl font-bold mb-4">News</h2>
-            <div className="space-y-3 max-h-[500px] overflow-auto">
+            <h2 className="text-xl font-bold mb-4">Market News</h2>
+
+            <div className="space-y-4 max-h-[520px] overflow-auto pr-2">
               {news.map((n, i) => (
-                <div key={i} className="bg-slate-800 p-3 rounded-xl">
-                  <p className="text-sm">{n.headline}</p>
-                </div>
+                <a
+                  key={i}
+                  href={n.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block bg-slate-800/60 hover:bg-slate-800 transition rounded-2xl p-4 border border-slate-700/40 hover:border-slate-600"
+                >
+                  <div className="flex gap-3">
+
+                    {n.image && (
+                      <img
+                        src={n.image}
+                        alt=""
+                        className="w-20 h-20 object-cover rounded-xl flex-shrink-0"
+                      />
+                    )}
+
+                    <div className="flex-1 space-y-2">
+
+                      <p className="font-semibold text-white leading-snug line-clamp-2">
+                        {n.headline}
+                      </p>
+
+                      {n.summary && (
+                        <p className="text-sm text-slate-400 line-clamp-2">
+                          {n.summary}
+                        </p>
+                      )}
+
+                      <div className="flex justify-between text-xs text-slate-500 pt-1">
+                        <span>{n.source}</span>
+
+                        {n.datetime && (
+                          <span>
+                            {new Date(n.datetime * 1000).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        )}
+                      </div>
+
+                    </div>
+                  </div>
+                </a>
               ))}
             </div>
           </div>
@@ -277,6 +248,7 @@ export default function App() {
         {/* WATCHLIST */}
         <div className="bg-slate-900/60 p-6 rounded-3xl">
           <h2 className="text-xl font-bold mb-3">Watchlist</h2>
+
           <div className="flex gap-3 flex-wrap">
             {watchlist.map((s) => (
               <button
@@ -292,8 +264,10 @@ export default function App() {
 
         {/* TRADE SIMULATOR */}
         <div className="bg-slate-900/60 p-6 rounded-3xl">
+
           <div className="flex justify-between mb-4">
             <h2 className="text-xl font-bold">Trade Simulator</h2>
+
             <button
               onClick={() => setPositions([])}
               className="bg-red-500/20 text-red-300 px-4 py-2 rounded-xl"
@@ -313,9 +287,11 @@ export default function App() {
             <div className="bg-slate-800 p-3 rounded-xl">
               Positions: {positions.length}
             </div>
+
             <div className="bg-slate-800 p-3 rounded-xl">
               Value: ${portfolioValue.toFixed(2)}
             </div>
+
             <div className={`bg-slate-800 p-3 rounded-xl ${portfolioPnL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
               P/L: ${portfolioPnL.toFixed(2)}
             </div>
@@ -337,6 +313,7 @@ export default function App() {
               );
             })}
           </div>
+
         </div>
 
       </div>
